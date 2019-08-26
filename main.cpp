@@ -2,6 +2,7 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <time.h>       /* time */
 #include <stdio.h>
 #include <stdint.h>
 #include <vector>
@@ -10,7 +11,7 @@
 
 // You probably want -std=gnu99 instead of -std=c99. C99 mode explicitly disables (most) GNU extensions.
 
-// uint8_t code[] = {
+// uint8_t origin_code[] = {
 //     0x55 ,                                              //push   rbp
 //     0x48, 0x89, 0xe5,             	                    //mov    rbp,rsp
 //     0x48, 0x89, 0x7d, 0xe8,          	                //mov    QWORD PTR [rbp-0x18],rdi
@@ -38,7 +39,7 @@
 
 
 // rdi = b , rsi = n , rdx = p
-uint8_t code [] = {
+uint8_t origin_code [] = {
     0x55 ,                                          // 0 push rbp
     0x48 , 0x89 , 0xE5 ,                            // 1 mov rbp, rsp
     0x48 , 0x89 , 0xD1 ,                            // 2 mov rcx, rdx (p)
@@ -178,15 +179,91 @@ void mapJumpLocations(const std::vector<Instruction> &vec){
 
 }
 
+//FIXME:
+void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec){
 
-int main(){
+    for(uint32_t i = 0; i < jumps_metadata.size(); i++){
 
-    std::vector <Instruction> origin_vector;
+        //TODO: cada cromossomo vai precisar de seus metadados
+        // MetaDataJump aux = jumps_metadata[i];
+        uint32_t src_line = jumps_metadata[i].src_line;
+        uint32_t dest_line = jumps_metadata[i].dest_line;
+        int32_t rel_value = jumps_metadata[i].rel_value;
+
+        if (rel_value > 0){ // dest_line > src_line (a jump forwards)
+            if(newline > src_line && newline <= dest_line){ // we need to alter dest_line and value
+
+                //FIXME: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
+                uint8_t instr_size = instruction_sizes_map[0x0f];
+
+                rel_value += nbytes;
+
+                for(uint8_t idx = 0; idx < 4; idx++){
+                    vec[src_line].instr[instr_size - idx - 1] = (uint8_t)((0xFF000000 >> 8*idx) & rel_value)>>(8*(3-idx));
+                }
+
+                jumps_metadata[i].dest_line++;
+                jumps_metadata[i].rel_value = rel_value;
+
+            }else if(newline < src_line){ // if the instruction is before src_line than shift both source and destination by 1line
+                jumps_metadata[i].src_line++;
+                jumps_metadata[i].dest_line++;
+
+            }
+        }else{  // this means that src_line > dest_line (a jump backwards)
+            if(newline < src_line && newline >= dest_line){
+
+                //FIXME: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
+                uint8_t instr_size = instruction_sizes_map[0xe9];
+
+                rel_value -= nbytes;
+
+                for(uint8_t idx = 0; idx < 4; idx++){
+                    vec[src_line].instr[instr_size - idx - 1] = ((0xFF000000 >> 8*idx) & rel_value)>>(8*(3-idx));
+                }
+
+                jumps_metadata[i].src_line++;
+                jumps_metadata[i].rel_value = rel_value;
+
+            }else if(newline < dest_line){ // if the instruction is before dest_line than shift both source and destination by 1line
+                jumps_metadata[i].src_line++;
+                jumps_metadata[i].dest_line++;
+            }
+        }
+    }
+}
+
+
+uint32_t generateRandomNumber(uint32_t bottom, uint32_t top){ 
+    return rand() % (top) + bottom;
+}
+
+void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromossome){
+
+    uint32_t idx = 0; 
+    for ( auto &elem : chromossome ) {
+
+        uint8_t* pos = elem.instr.data();
+        for(uint32_t i = 0; i < elem.instr.size(); i++){
+            code2memory[idx++] = *pos++;
+        }
+    }
+
+}
+
+
+void executeInMemory(std::vector<Instruction> &chromossome){
+
+    //FIXME: 42 é um tamanho hardcoded, consertar.
+    uint32_t chrom_size = 42;
+    uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
+
+    copyVectorToArray(code2memory, chromossome);    
+
     uint32_t length = sysconf ( _SC_PAGE_SIZE ) ;
-
     void * memory = mmap (NULL , length , PROT_NONE , MAP_PRIVATE | MAP_ANONYMOUS , -1 , 0);
     mprotect ( memory , length , PROT_WRITE );
-    memcpy ( memory , ( void *) ( code ) , sizeof ( code ) );
+    memcpy ( memory , ( void *) ( code2memory ) , sizeof(code2memory)*chrom_size );
     mprotect ( memory , length , PROT_EXEC );
 
     // uint32_t n = 10;
@@ -199,19 +276,73 @@ int main(){
 
     printf ( "2^12 mod 10 = %lu \n" , (* jit ) (2 , 12 ,10 ) ) ; // valor menor para usar enquanto testo
 
-    addSourceCodeToVector(code, origin_vector, sizeof(code)/sizeof(uint8_t));
+    munmap ( memory , length ) ;
+}
 
-    // printInstructionVector(origin_vector);
+int main(){
 
-    mapJumpLocations(origin_vector);
+    std::vector <Instruction> origin_vector;    
 
-    for ( auto &i : jumps_metadata ) {
-        // std::cout << "dest"i.dest_line +  << std::endl;
-        printf("srcLine=%2d, destLine=%2d, value=%#.8X\n", i.src_line, i.dest_line, i.rel_value);
+    addSourceCodeToVector(origin_code, origin_vector, sizeof(origin_code)/sizeof(uint8_t));
+
+    std::vector <Instruction> chromossome = origin_vector;
+
+    mapJumpLocations(chromossome);
+
+    // for ( auto &i : jumps_metadata ) {
+    //     printf("srcLine=%2d, destLine=%2d, value=%#.8X\n", i.src_line, i.dest_line, i.rel_value);
+    // }
+
+    executeInMemory(chromossome);
+
+    srand((uint32_t) time(0));
+    for (uint32_t k = 0; k < 20; k++){
+        printf("%d: ",k);
+        int random_place = generateRandomNumber(1, origin_vector.size()-1);
+
+        //FIXME:
+        //TODO: remover instrução unica, hardcoded e tamanho unico
+        int nop_size = 1; // tamanho teste
+        Instruction a;
+        a.instr.push_back((uint8_t) 0x90);
+        a.size = 1;
+
+        remapJumpLocations(random_place, nop_size, chromossome);
+        chromossome.insert(chromossome.begin() + random_place, a);
+        executeInMemory(chromossome);
     }
 
-    munmap ( memory , length ) ;
+    printf("\nVetor original: \n");
+    printInstructionVector(origin_vector);
+    printf("\nVetor modificado: \n");
+    printInstructionVector(chromossome);
 
     return 0;
 }
 
+// The one-byte NOP instruction is an alias mnemonic for the XCHG (E)AX, (E)AX instruction.
+// +---------+--------------------------------+------------------------------+
+// | LENGTH  |           ASSEMBLY             |         BYTE SEQUENCE        |
+// +---------+--------------------------------+------------------------------+
+// |         |                                |                              |
+// | 2 bytes |  66 NOP                        |  66 90H                      |
+// |         |                                |                              |
+// | 3 bytes |  NOP DWORD ptr [EAX]           |  0F 1F 00H                   |
+// |         |                                |                              |
+// | 4 bytes |  NOP DWORD ptr [EAX + 00H]     |  0F 1F 40 00H                |
+// |         |                                |                              |
+// | 5 bytes |  NOP DWORD ptr [EAX + EAX*1 +  |  0F 1F 44 00 00H             |
+// |         | 00H]                           |                              |
+// |         |                                |                              |
+// | 6 bytes |  66 NOP DWORD ptr [EAX + EAX*1 |  66 0F 1F 44 00 00H          |
+// |         |  + 00H]                        |                              |
+// |         |                                |                              |
+// | 7 bytes |  NOP DWORD ptr [EAX + 00000000 |  0F 1F 80 00 00 00 00H       |
+// |         | H]                             |                              |
+// |         |                                |                              |
+// | 8 bytes |  NOP DWORD ptr [EAX + EAX*1 +  |  0F 1F 84 00 00 00 00 00H    |
+// |         | 00000000H]                     |                              |
+// |         |                                |                              |
+// | 9 bytes |  66 NOP DWORD ptr [EAX + EAX*1 |  66 0F 1F 84 00 00 00 00 00H |
+// |         |  + 00000000H]                  |                              |
+// +---------+--------------------------------+------------------------------+
