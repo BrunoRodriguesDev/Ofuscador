@@ -179,7 +179,6 @@ void mapJumpLocations(const std::vector<Instruction> &vec){
 
 }
 
-//FIXME:
 void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec){
 
     for(uint32_t i = 0; i < jumps_metadata.size(); i++){
@@ -193,7 +192,7 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
         if (rel_value > 0){ // dest_line > src_line (a jump forwards)
             if(newline > src_line && newline <= dest_line){ // we need to alter dest_line and value
 
-                //FIXME: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
+                //TODO: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
                 uint8_t instr_size = instruction_sizes_map[0x0f];
 
                 rel_value += nbytes;
@@ -213,7 +212,7 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
         }else{  // this means that src_line > dest_line (a jump backwards)
             if(newline < src_line && newline >= dest_line){
 
-                //FIXME: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
+                //TODO: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
                 uint8_t instr_size = instruction_sizes_map[0xe9];
 
                 rel_value -= nbytes;
@@ -234,8 +233,8 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
 }
 
 
-uint32_t generateRandomNumber(uint32_t bottom, uint32_t top){ 
-    return rand() % (top) + bottom;
+uint32_t generateRandomNumber(uint32_t min, uint32_t max){ 
+    return rand() % (max) + min;
 }
 
 void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromossome){
@@ -248,14 +247,16 @@ void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromosso
             code2memory[idx++] = *pos++;
         }
     }
-
 }
-
 
 void executeInMemory(std::vector<Instruction> &chromossome){
 
     //FIXME: 42 é um tamanho hardcoded, consertar.
-    uint32_t chrom_size = 42;
+    uint32_t chrom_size = 0;
+    for(uint32_t i = 0; i < chromossome.size(); i++){
+        chrom_size += chromossome[i].size;
+    }
+    
     uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
 
     copyVectorToArray(code2memory, chromossome);    
