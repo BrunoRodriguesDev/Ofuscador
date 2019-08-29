@@ -110,6 +110,7 @@ void addSourceCodeToVector(uint8_t* sourcecode, std::vector<Instruction> &to_vec
 void printInstructionVector(const std::vector<Instruction> &vec){
 
     for(std::size_t i = 0; i < vec.size() ; ++i){
+        // printf("%d: ", i);
         for (uint32_t j = 0; j < vec[i].instr.size(); j++){
             printf("%#2X ", vec[i].instr[j]);
         }
@@ -188,6 +189,7 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
         uint32_t src_line = jumps_metadata[i].src_line;
         uint32_t dest_line = jumps_metadata[i].dest_line;
         int32_t rel_value = jumps_metadata[i].rel_value;
+        // printf("antes: jumps_metadata[%d] -> src=%d, dest=%d, value=%d \n",i, jumps_metadata[i].src_line, jumps_metadata[i].dest_line, jumps_metadata[i].rel_value);
 
         if (rel_value > 0){ // dest_line > src_line (a jump forwards)
             if(newline > src_line && newline <= dest_line){ // we need to alter dest_line and value
@@ -204,13 +206,13 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
                 jumps_metadata[i].dest_line++;
                 jumps_metadata[i].rel_value = rel_value;
 
-            }else if(newline < src_line){ // if the instruction is before src_line than shift both source and destination by 1line
+            }else if(newline <= src_line){ // if the instruction is before src_line than shift both source and destination by 1line
                 jumps_metadata[i].src_line++;
                 jumps_metadata[i].dest_line++;
 
             }
         }else{  // this means that src_line > dest_line (a jump backwards)
-            if(newline < src_line && newline >= dest_line){
+            if(newline <= src_line && newline > dest_line){
 
                 //TODO: buscar a informacao correta do tamanho da instrucao (hardcoded por enquanto)
                 uint8_t instr_size = instruction_sizes_map[0xe9];
@@ -224,11 +226,12 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
                 jumps_metadata[i].src_line++;
                 jumps_metadata[i].rel_value = rel_value;
 
-            }else if(newline < dest_line){ // if the instruction is before dest_line than shift both source and destination by 1line
+            }else if(newline <= dest_line){ // if the instruction is before dest_line than shift both source and destination by 1line
                 jumps_metadata[i].src_line++;
                 jumps_metadata[i].dest_line++;
             }
         }
+        // printf("antes: jumps_metadata[%d] -> src=%d, dest=%d, value=%d \n",i, jumps_metadata[i].src_line, jumps_metadata[i].dest_line, jumps_metadata[i].rel_value);
     }
 }
 
@@ -298,8 +301,9 @@ int main(){
 
     srand((uint32_t) time(0));
     for (uint32_t k = 0; k < 20; k++){
-        printf("%d: ",k);
+
         int random_place = generateRandomNumber(1, origin_vector.size()-1);
+        // printf("gene %d: , posicao_aleatoria: %d \n",k, random_place);
 
         //FIXME:
         //TODO: remover instrução unica, hardcoded e tamanho unico
@@ -310,13 +314,15 @@ int main(){
 
         remapJumpLocations(random_place, nop_size, chromossome);
         chromossome.insert(chromossome.begin() + random_place, a);
+        printInstructionVector(chromossome);
+        printf("\n");
         executeInMemory(chromossome);
     }
 
-    printf("\nVetor original: \n");
-    printInstructionVector(origin_vector);
-    printf("\nVetor modificado: \n");
-    printInstructionVector(chromossome);
+    // printf("\nVetor original: \n");
+    // printInstructionVector(origin_vector);
+    // printf("\nVetor modificado: \n");
+    // printInstructionVector(chromossome);
 
     return 0;
 }
