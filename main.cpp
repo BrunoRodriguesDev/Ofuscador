@@ -2,59 +2,35 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <time.h>       /* time */
+#include <time.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <vector>
 #include <map>
 #include <iostream>
 
-// You probably want -std=gnu99 instead of -std=c99. C99 mode explicitly disables (most) GNU extensions.
-
-// uint8_t origin_code[] = {
-//     0x55 ,                                              //push   rbp
-//     0x48, 0x89, 0xe5,             	                    //mov    rbp,rsp
-//     0x48, 0x89, 0x7d, 0xe8,          	                //mov    QWORD PTR [rbp-0x18],rdi
-//     0x48, 0xc7, 0x45, 0xf0, 0x01, 0x00, 0x00, 0x00, 	//mov    QWORD PTR [rbp-0x10],0x1   
-//     0x48, 0xc7, 0x45, 0xf8, 0x02, 0x00, 0x00, 0x00, 	//mov    QWORD PTR [rbp-0x8],0x2   
-//     0xeb, 0x12,                	                        //jmp    1161 <fatorial_inter+0x2c>
-//     0x48, 0x8b, 0x45, 0xf0,          	                //mov    rax,QWORD PTR [rbp-0x10]
-//     0x48, 0x0f, 0xaf, 0x45, 0xf8,       	            //imul   rax,QWORD PTR [rbp-0x8]
-//     0x48, 0x89, 0x45, 0xf0,          	                //mov    QWORD PTR [rbp-0x10],rax
-//     0x48, 0x83, 0x45, 0xf8, 0x01,       	            //add    QWORD PTR [rbp-0x8],0x1
-//     0x48, 0x8b, 0x45, 0xf8,          	                //mov    rax,QWORD PTR [rbp-0x8]
-//     0x48, 0x3b, 0x45, 0xe8,          	                //cmp    rax,QWORD PTR [rbp-0x18]
-//     0x76, 0xe4,                	                        //jbe    114f <fatorial_inter+0x1a>
-//     0x48, 0x8b, 0x45, 0xf0,          	                //mov    rax,QWORD PTR [rbp-0x10]
-//     0x5d,                   	                        //pop    rbp
-//     0xc3,                   	                        //ret  
-// };
-
-// std::map <uint8_t, uint8_t> instruction_sizes = {
-//     {0x55, 1},  // push
-//     {0xc3, 1},  // ret
-//     {0xEB, 2},  // jmp
-//     {0x76, 2}  // jbe     
-// };
+#define N_GENES 1
 
 
 // rdi = b , rsi = n , rdx = p
-uint8_t origin_code [] = {
-    0x55 ,                                          // 0 push rbp
-    0x48 , 0x89 , 0xE5 ,                            // 1 mov rbp, rsp
-    0x48 , 0x89 , 0xD1 ,                            // 2 mov rcx, rdx (p)
-    0x66 , 0xB8 , 0x01 , 0x00,                      // 3 mov(movi) ax, 1 (a=1)
-    0x4D , 0x31 , 0xC0 ,                            // 4 xor r8, r8 (i=0)
-    0x49 , 0x39 , 0xF0 ,                            // 5 cmp r8, rsi (i?n)
-    0x0F , 0x83 , 0x11 , 0x00 , 0x00 , 0x00 ,       // 6 jae 0x11 (i>=n end)
-    0x48 , 0xF7 , 0xE7 ,                            // 7 mul rdi (a = a * b)
-    0x48 , 0xF7 , 0xF1 ,                            // 8 div rcx (rdx = a % p)
-    0x48 , 0x89 , 0xD0 ,                            // 9 mov rax, rdx (rax = rdx)
-    0x49 , 0xFF , 0xC0 ,                            // 10 inc r8 (i ++)
-    0xE9 , 0xE6 , 0xFF , 0xFF , 0xFF ,              // 11 jmp  -0x1A (loop again) // 0x1110 0110 -> 0001 1010
-    0x5D ,                                          // 12 pop rbp
-    0xC3 ,                                          // 13 ret
-};
+// uint8_t origin_code [] = {
+//     0x55 ,                                          // 0 push rbp
+//     0x48 , 0x89 , 0xE5 ,                            // 1 mov rbp, rsp
+//     0x48 , 0x89 , 0xD1 ,                            // 2 mov rcx, rdx (p)
+//     0x66 , 0xB8 , 0x01 , 0x00,                      // 3 mov(movi) ax, 1 (a=1)
+//     0x4D , 0x31 , 0xC0 ,                            // 4 xor r8, r8 (i=0)
+//     0x49 , 0x39 , 0xF0 ,                            // 5 cmp r8, rsi (i?n)
+//     0x0F , 0x83 , 0x11 , 0x00 , 0x00 , 0x00 ,       // 6 jae 0x11 (i>=n end)
+//     0x48 , 0xF7 , 0xE7 ,                            // 7 mul rdi (a = a * b)
+//     0x48 , 0xF7 , 0xF1 ,                            // 8 div rcx (rdx = a % p)
+//     0x48 , 0x89 , 0xD0 ,                            // 9 mov rax, rdx (rax = rdx)
+//     0x49 , 0xFF , 0xC0 ,                            // 10 inc r8 (i ++)
+//     0xE9 , 0xE6 , 0xFF , 0xFF , 0xFF ,              // 11 jmp  -0x1A (loop again) // 0x1110 0110 -> 0001 1010
+//     0x5D ,                                          // 12 pop rbp
+//     0xC3 ,                                          // 13 ret
+// };
+// The one-byte NOP instruction is an alias mnemonic for the XCHG (E)AX, (E)AX instruction.
 
 
 /*
@@ -64,10 +40,15 @@ struct Instruction {
     std::vector <uint8_t> instr;
     uint8_t size:4; //  15 = 1111, 4 bits
 };
-struct MetaDataJump{
+struct MetadataJump{
     uint32_t src_line;
     uint32_t dest_line;
     int32_t rel_value;
+};
+
+struct Chromossome{
+    std::vector<Instruction> instructions;
+    std::vector<MetadataJump> metadata;  
 };
 
 std::map <uint8_t, uint8_t> instruction_sizes_map = {
@@ -79,10 +60,13 @@ std::map <uint8_t, uint8_t> instruction_sizes_map = {
     {0x4D, 3},  // xor regx, regx
     {0x66, 4},  // movi 
     {0xE9, 5},  // jmp im32
-    {0x0F, 6}  // jae im32
+    {0x0F, 6}   // jae im32
 };
 
-std::vector<MetaDataJump> jumps_metadata;
+//TODO: remover instrução unica, hardcoded e tamanho unico
+const std::vector<uint8_t> gene_pool[N_GENES] = {
+    {0x90}
+};
 
 
 uint8_t getSizeOfInstruction(uint8_t opcode){
@@ -118,7 +102,7 @@ void printInstructionVector(const std::vector<Instruction> &vec){
     } 
 }
 
-
+//TODO: dar um nome mais intuitivo para essa funcao
 uint32_t mapJumpLocationsAux(const std::vector<Instruction> vec, uint32_t line, int32_t value){
     uint32_t sum = 0, currentline = line; 
     for(;;){
@@ -141,11 +125,10 @@ uint32_t mapJumpLocationsAux(const std::vector<Instruction> vec, uint32_t line, 
             }
         }
     }
-    
-
 }
 
-void mapJumpLocations(const std::vector<Instruction> &vec){
+//Executed only once
+void mapJumpLocations(const std::vector<Instruction> &vec, std::vector<MetadataJump> &jumps_metadata){
 
     for (uint32_t line = 0; line < vec.size(); line++ ){
 
@@ -153,7 +136,7 @@ void mapJumpLocations(const std::vector<Instruction> &vec){
         uint8_t opcode = instr[0];
         uint32_t size = instr.size();
         int32_t value = 0x0;
-        MetaDataJump meta_aux;
+        MetadataJump meta_aux;
 
 
         if (opcode == 0xE9){ // jmp
@@ -180,12 +163,12 @@ void mapJumpLocations(const std::vector<Instruction> &vec){
 
 }
 
-void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec){
+void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec, std::vector<MetadataJump> &jumps_metadata){
 
     for(uint32_t i = 0; i < jumps_metadata.size(); i++){
 
         //TODO: cada cromossomo vai precisar de seus metadados
-        // MetaDataJump aux = jumps_metadata[i];
+        // MetadataJump aux = jumps_metadata[i];
         uint32_t src_line = jumps_metadata[i].src_line;
         uint32_t dest_line = jumps_metadata[i].dest_line;
         int32_t rel_value = jumps_metadata[i].rel_value;
@@ -235,9 +218,9 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
     }
 }
 
-
+//Returns a random number between min and max ie. [min, max] 
 uint32_t generateRandomNumber(uint32_t min, uint32_t max){ 
-    return rand() % (max) + min;
+    return rand() % (max)  + min;
 }
 
 void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromossome){
@@ -252,14 +235,14 @@ void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromosso
     }
 }
 
+//Executes in memory a vector containing bytes correspondent to x86 instructions    
 void executeInMemory(std::vector<Instruction> &chromossome){
 
-    //FIXME: 42 é um tamanho hardcoded, consertar.
     uint32_t chrom_size = 0;
     for(uint32_t i = 0; i < chromossome.size(); i++){
         chrom_size += chromossome[i].size;
     }
-    
+
     uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
 
     copyVectorToArray(code2memory, chromossome);    
@@ -283,73 +266,113 @@ void executeInMemory(std::vector<Instruction> &chromossome){
     munmap ( memory , length ) ;
 }
 
-int main(){
 
-    std::vector <Instruction> origin_vector;    
+void* pthreadExecuteInMemory(void* args){
 
-    addSourceCodeToVector(origin_code, origin_vector, sizeof(origin_code)/sizeof(uint8_t));
+    std::vector<Instruction>* pointer = static_cast<std::vector<Instruction>*>(args);
+    std::vector<Instruction> chromossome = *pointer;
+    
+    // std::vector<Instruction> &chromossome = std::vector<Instruction>*(args);
+    printf("executando thread...\n");
 
-    std::vector <Instruction> chromossome = origin_vector;
-
-    mapJumpLocations(chromossome);
-
-    // for ( auto &i : jumps_metadata ) {
-    //     printf("srcLine=%2d, destLine=%2d, value=%#.8X\n", i.src_line, i.dest_line, i.rel_value);
-    // }
-
-    executeInMemory(chromossome);
-
-    srand((uint32_t) time(0));
-    for (uint32_t k = 0; k < 20; k++){
-
-        int random_place = generateRandomNumber(1, origin_vector.size()-1);
-        // printf("gene %d: , posicao_aleatoria: %d \n",k, random_place);
-
-        //FIXME:
-        //TODO: remover instrução unica, hardcoded e tamanho unico
-        int nop_size = 1; // tamanho teste
-        Instruction a;
-        a.instr.push_back((uint8_t) 0x90);
-        a.size = 1;
-
-        remapJumpLocations(random_place, nop_size, chromossome);
-        chromossome.insert(chromossome.begin() + random_place, a);
-        printInstructionVector(chromossome);
-        printf("\n");
-        executeInMemory(chromossome);
+    uint32_t chrom_size = 0;
+    for(uint32_t i = 0; i < chromossome.size(); i++){
+        chrom_size += chromossome[i].size;
     }
 
-    // printf("\nVetor original: \n");
-    // printInstructionVector(origin_vector);
-    // printf("\nVetor modificado: \n");
-    // printInstructionVector(chromossome);
+    uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
+
+    copyVectorToArray(code2memory, chromossome);    
+
+    uint32_t length = sysconf ( _SC_PAGE_SIZE ) ;
+    void * memory = mmap (NULL , length , PROT_NONE , MAP_PRIVATE | MAP_ANONYMOUS , -1 , 0);
+    mprotect ( memory , length , PROT_WRITE );
+    memcpy ( memory , ( void *) ( code2memory ) , sizeof(code2memory)*chrom_size );
+    mprotect ( memory , length , PROT_EXEC );
+
+
+    const uint64_t (* jit ) ( const uint32_t , const uint32_t , const uint64_t ) = 
+        ( const uint64_t (*) ( const uint32_t , const uint32_t , const uint64_t ) ) ( memory ) ;
+    // printf ( " 2^123456789 mod 18446744073709551533 = %lu \n" , (* jit ) (2 , 123456789 ,18446744073709551533ULL ) ) ;
+
+    uint64_t retval = (*jit)(2, 12, 10);
+
+    printf ( "2^12 mod 10 = %lu \n" , retval ) ; // valor menor para usar enquanto testo
+
+    munmap ( memory , length ) ;
+    pthread_exit ( (void *) retval );
+}
+
+
+// Inserts in *aux a random instruction from the gene pool
+void addRandomInstruction(Chromossome &chromossome, uint32_t random_gene, uint32_t random_line){
+
+    Instruction aux;
+    for (auto &byte: gene_pool[random_gene]){
+        aux.instr.push_back(byte);
+    }
+    aux.size = aux.instr.size();
+
+    chromossome.instructions.insert(chromossome.instructions.begin() + random_line, aux);
+}
+
+
+int main(){
+
+    // for(auto &x: gene_pool){
+    //     printf("size %d ", x.size());
+    //     for(auto &&g : x){
+    //         printf("%#x ", g);
+    //     }
+    //     printf("\n");
+    // }
+
+    FILE *file;
+
+
+    std::vector <Instruction> origin_vector;
+    std::vector <Chromossome> chromossome_list;
+    pthread_t thread;
+    uint32_t bytes;
+    void* status = 0;
+    uint32_t n = 0, i = 0;
+    Chromossome aux;
+    chromossome_list.push_back(aux); // just so it initializes 
+
+    file = fopen("code.hex", "r");
+    if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
+    else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
+
+    rewind(file);
+    uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
+    // uint8_t origin_code[n];    
+    while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
+    fclose(file);
+
+    // addSourceCodeToVector(origin_code, chromossome_list[0].instructions, sizeof(origin_code)/sizeof(uint8_t));
+    addSourceCodeToVector(origin_code, chromossome_list[0].instructions, n);
+    mapJumpLocations(chromossome_list[0].instructions, chromossome_list[0].metadata );
+
+    srand((uint32_t) time(0));
+    for (uint32_t k = 0; k < 1; k++){
+
+        uint32_t random_line = generateRandomNumber(1, chromossome_list[0].instructions.size()-1);
+
+        uint32_t random_gene = generateRandomNumber(0, N_GENES);
+
+        remapJumpLocations(random_line, gene_pool[random_gene].size(), chromossome_list[0].instructions, chromossome_list[0].metadata);
+        addRandomInstruction( chromossome_list[0], random_gene, random_line);
+
+        printInstructionVector(chromossome_list[0].instructions);
+        printf("\n");
+
+        pthread_create( &thread, NULL, pthreadExecuteInMemory, &chromossome_list[0]);
+        pthread_join(thread, &status);
+
+        printf("retval: %lu",(uint64_t) status );
+
+        // executeInMemory(chromossome_list[0].instructions);
+    }
 
     return 0;
 }
-
-// The one-byte NOP instruction is an alias mnemonic for the XCHG (E)AX, (E)AX instruction.
-// +---------+--------------------------------+------------------------------+
-// | LENGTH  |           ASSEMBLY             |         BYTE SEQUENCE        |
-// +---------+--------------------------------+------------------------------+
-// |         |                                |                              |
-// | 2 bytes |  66 NOP                        |  66 90H                      |
-// |         |                                |                              |
-// | 3 bytes |  NOP DWORD ptr [EAX]           |  0F 1F 00H                   |
-// |         |                                |                              |
-// | 4 bytes |  NOP DWORD ptr [EAX + 00H]     |  0F 1F 40 00H                |
-// |         |                                |                              |
-// | 5 bytes |  NOP DWORD ptr [EAX + EAX*1 +  |  0F 1F 44 00 00H             |
-// |         | 00H]                           |                              |
-// |         |                                |                              |
-// | 6 bytes |  66 NOP DWORD ptr [EAX + EAX*1 |  66 0F 1F 44 00 00H          |
-// |         |  + 00H]                        |                              |
-// |         |                                |                              |
-// | 7 bytes |  NOP DWORD ptr [EAX + 00000000 |  0F 1F 80 00 00 00 00H       |
-// |         | H]                             |                              |
-// |         |                                |                              |
-// | 8 bytes |  NOP DWORD ptr [EAX + EAX*1 +  |  0F 1F 84 00 00 00 00 00H    |
-// |         | 00000000H]                     |                              |
-// |         |                                |                              |
-// | 9 bytes |  66 NOP DWORD ptr [EAX + EAX*1 |  66 0F 1F 84 00 00 00 00 00H |
-// |         |  + 00000000H]                  |                              |
-// +---------+--------------------------------+------------------------------+
