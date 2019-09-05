@@ -232,7 +232,7 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
 }
 
 //Returns a random number between min and max ie. [min, max] 
-uint32_t generateRandomNumber(uint32_t min, uint32_t max){ 
+inline uint32_t generateRandomNumber(uint32_t min, uint32_t max){ 
     return rand() % (max)  + min;
 }
 
@@ -368,11 +368,136 @@ void *pthreadWaitOrKill(void* args){
 void addRandomInstruction(Chromossome &chromossome, uint32_t random_gene, uint32_t random_line){
 
     Instruction aux;
-    for (auto &byte: gene_pool[random_gene]){
-        aux.instr.push_back(byte);
-    }
-    aux.size = aux.instr.size();
 
+    uint8_t reg_x = generateRandomNumber(0, 15);
+    uint8_t reg_y = generateRandomNumber(0, 15);
+    uint32_t randomValue = generateRandomNumber(0, UINT32_MAX);
+
+    switch (random_gene){
+        case 0: //INC reg
+            //0100100X 11111111 11000XXX
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xFF , regs };
+        break;
+
+        case 1: //CMP reg, reg
+            // 01001X0Y 00111001 11XXXYYY
+            uint8_t ext = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            aux.instr = {ext , 0x39 , regs};
+        break;
+        case 2: // XOR reg, reg
+            // 01001X0Y 00110001 11XXXYYY
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            aux.instr = {ext , 0x31 , regs};
+        break;
+        case 3: // XOR reg, im32
+            if(reg_x == 1){
+                aux.instr = {0x48 , 0x35};
+            } else{
+                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                uint8_t regs = (0b11110000) | ((reg_x & 0x7));
+                aux.instr = {ext , 0x81 , regs};
+            }
+            uint8_t byte;
+            for(uint8_t idx = 0; idx < 4; idx++){
+                byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
+                aux.instr.push_back(byte);
+            }
+        break;
+
+        case 4: //ADD reg, reg
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            aux.instr = {ext , 0x01 , regs};
+        break;
+        case 5: //ADD reg, im32
+            if(reg_x == 1){
+                aux.instr = {0x48 , 0x05};
+            } else{
+                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+                aux.instr = {ext , 0x81 , regs};
+            }
+            uint8_t byte;
+            for(uint8_t idx = 0; idx < 4; idx++){
+                byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
+                aux.instr.push_back(byte);
+            }
+        break;
+
+        case 6: //BSWAP reg - Byte Swap
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0x0F , regs };
+        break;
+
+        case 7: //NOT reg - One's Complement Negation
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            uint8_t regs = (0b11010000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xF7 , regs };
+        break;
+
+        case 8: //NEG reg - Two's Complement Negation
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            uint8_t regs = (0b11011000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xF7 , regs };
+        break;
+
+        case 9: //NEG reg - Two's Complement Negation
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            uint8_t regs = (0b11001000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xFF , regs };
+        break;
+
+        case 10: //AND
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            aux.instr = {ext , 0x21 , regs};
+        break;
+        case 11: // AND reg, im32
+            if(reg_x == 1){
+                aux.instr = {0x48 , 0x0D};
+            } else{
+                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                uint8_t regs = (0b11001000) | ((reg_x & 0x7));
+                aux.instr = {ext , 0x81 , regs};
+            }
+            uint8_t byte;
+            for(uint8_t idx = 0; idx < 4; idx++){
+                byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
+                aux.instr.push_back(byte);
+            }
+        break;
+
+        case 12: //OR reg, reg
+            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            aux.instr = {ext , 0x09 , regs};
+        break;
+        case 13: // OR reg, im32
+            if(reg_x == 1){
+                aux.instr = {0x48 , 0x25};
+            } else{
+                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                uint8_t regs = (0b11100000) | ((reg_x & 0x7));
+                aux.instr = {ext , 0x81 , regs};
+            }
+            uint8_t byte;
+            for(uint8_t idx = 0; idx < 4; idx++){
+                byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
+                aux.instr.push_back(byte);
+            }
+        break;
+
+        case 14: // CLC — Clear Carry Flag
+            aux.instr = {0xF8};
+        break;
+    }
+
+    aux.size = aux.instr.size();
     chromossome.instructions.insert(chromossome.instructions.begin() + random_line, aux);
 }
 
@@ -403,12 +528,10 @@ int main(){
     else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
 
     rewind(file);
-    uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
-    // uint8_t origin_code[n];    
+    uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));  
     while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
     fclose(file);
 
-    // addSourceCodeToVector(origin_code, chromossome_list[0].instructions, sizeof(origin_code)/sizeof(uint8_t));
     addSourceCodeToVector(origin_code, chromossome_list[0].instructions, n);
     mapJumpLocations(chromossome_list[0].instructions, chromossome_list[0].metadata );
 
