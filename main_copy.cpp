@@ -1,5 +1,7 @@
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <time.h>
@@ -10,7 +12,7 @@
 #include <map>
 #include <iostream>
 
-#define N_GENES 1
+#define N_OF_GENES 1
 
 
 // rdi = b , rsi = n , rdx = p
@@ -47,7 +49,7 @@ struct MetadataJump{
 };
 
 struct Chromossome{
-    std::vector<Instruction> instructions;
+    std::vector<Instruction> chromossome;
     std::vector<MetadataJump> metadata;  
 };
 
@@ -64,7 +66,7 @@ std::map <uint8_t, uint8_t> instruction_sizes_map = {
 };
 
 //TODO: remover instrução unica, hardcoded e tamanho unico
-const std::vector<uint8_t> gene_pool[N_GENES] = {
+const std::vector<uint8_t> gene_pool[N_OF_GENES] = {
     {0x90}
 };
 
@@ -109,7 +111,7 @@ void printInstructionVector(const std::vector<Instruction> &vec){
     for(std::size_t i = 0; i < vec.size() ; ++i){
         // printf("%d: ", i);
         for (uint32_t j = 0; j < vec[i].instr.size(); j++){
-            printf("%#2X ", vec[i].instr[j]);
+            printf("%.2X ", vec[i].instr[j]);
         }
         printf("\n");
     } 
@@ -280,36 +282,14 @@ void executeInMemory(std::vector<Instruction> &chromossome){
     munmap ( memory , length ) ;
 }
 
-
-void *mythread(void* p){
-    
-    pthread_mutex_lock(&mutex);
-    threadRunnerId = pthread_self();
-    pthread_mutex_unlock(&mutex);
-
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-    pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
-    while(true){
-        // pthread_testcancel();
-    }
-}
-
-
+//TODO: fazer try-catch para tratar SIGBUS/SIGSEV
+//TODO: fazer com que os argumentos passados ao jit sejam dinamicos? 
 void* pthreadExecuteInMemory(void* _args){
 
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
     ptr_thread_arg_t ptr_args = (ptr_thread_arg_t) _args;
-    
-    printf("executando thread...\n");
-    threadRunnerId = pthread_self();
-
-    // while (true)
-    // {
-    //     // pthread_yield();
-    //     // pthread_testcancel();
-    // }
 
     uint32_t length = sysconf ( _SC_PAGE_SIZE ) ;
     void * memory = mmap (NULL , length , PROT_NONE , MAP_PRIVATE | MAP_ANONYMOUS , -1 , 0);
@@ -324,204 +304,216 @@ void* pthreadExecuteInMemory(void* _args){
 
     uint64_t retval = (*jit)(2, 12, 10);
 
-    printf ( "2^12 mod 10 = %lu \n" , retval ) ; // valor menor para usar enquanto testo
-
     munmap ( memory , length ) ;
-
-    pthread_cond_signal(&cond); 
-    // pthread_mutex_lock(&mutex);
-    // isRunnerThreadAlive = 0;; 
-    // pthread_mutex_unlock(&mutex);
 
     pthread_exit ( (void *) retval );
 }
 
 void *pthreadWaitOrKill(void* args){
 
-    printf("Gene %d\n", *( uint32_t *)args);
-
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += 2;
+    // clock_t start, end;
+    // double cpu_time_used;
+
+    // start = clock();
+
+    // pthread_cond_init(&cond, NULL);
 
     pthread_mutex_lock(&mutex);
-    int n = pthread_cond_timedwait(&cond, &mutex, &ts);
+    uint32_t n = pthread_cond_timedwait(&cond, &mutex, &ts);
     pthread_mutex_unlock(&mutex);
-    
-    if (n == 0){
-        printf("terminou de boa\n");
-    } else if (n == ETIMEDOUT){
-        
-        int x = pthread_cancel(threadRunnerId);
-        wasRunnerThreadKilled = 1; 
-        printf("teve que ser terminada com código %d\n", x);
+
+    if (n == 0 || n == ETIMEDOUT){
+
+        pthread_cancel( *(pthread_t*) args );
+
+        // end = clock();
+        // cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
     }
-
+    // pthread_cond_destroy(&cond);
     pthread_exit(NULL);
-
-    // pthread_mutex_lock(&mutex);
-    // // threadRunnerId = pthread_self();
-    // pthread_mutex_lock(&mutex);
 }
 
-// Inserts in *aux a random instruction from the gene pool
-void addRandomInstruction(Chromossome &chromossome, uint32_t random_gene, uint32_t random_line){
+// Inserts in *aux a random instruction (gene) 
+void selectRandomGene(Instruction &aux, uint32_t random_line){
 
-    Instruction aux;
+    uint8_t reg_x = generateRandomNumber(1, 15);    // rax is avoided (0)
+    uint8_t reg_y = generateRandomNumber(1, 15);    // rax is avoided (0)
+    uint32_t randomValue = generateRandomNumber(0, UINT32_MAX); // a random value to add when a IM32 is needed
+    uint32_t randomInstruction = generateRandomNumber(0, 15);   // 15 is the number of decoded instructions 
+    uint8_t ext;
+    uint8_t regs;
+    uint8_t byte;
 
-    uint8_t reg_x = generateRandomNumber(0, 15);
-    uint8_t reg_y = generateRandomNumber(0, 15);
-    uint32_t randomValue = generateRandomNumber(0, UINT32_MAX);
-
-    switch (random_gene){
+    switch (randomInstruction){
         case 0: //INC reg
             //0100100X 11111111 11000XXX
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11000000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xFF , regs };
+        break;
+        case 1: //DEC reg
+            //0100100X 11111111 11001XXX
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11001000) | ((reg_x & 0x7));
             aux.instr = {ext , 0xFF , regs };
         break;
 
-        case 1: //CMP reg, reg
+        case 2: //CMP reg, reg
             // 01001X0Y 00111001 11XXXYYY
-            uint8_t ext = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            ext = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
             aux.instr = {ext , 0x39 , regs};
         break;
-        case 2: // XOR reg, reg
+        
+        case 3: // XOR reg, reg
             // 01001X0Y 00110001 11XXXYYY
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
             aux.instr = {ext , 0x31 , regs};
         break;
-        case 3: // XOR reg, im32
+        case 4: // XOR reg, im32
             if(reg_x == 1){
                 aux.instr = {0x48 , 0x35};
             } else{
-                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-                uint8_t regs = (0b11110000) | ((reg_x & 0x7));
+                ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                regs = (0b11110000) | ((reg_x & 0x7));
                 aux.instr = {ext , 0x81 , regs};
             }
-            uint8_t byte;
+            
             for(uint8_t idx = 0; idx < 4; idx++){
                 byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
                 aux.instr.push_back(byte);
             }
         break;
 
-        case 4: //ADD reg, reg
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+        case 5: //ADD reg, reg
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
             aux.instr = {ext , 0x01 , regs};
         break;
-        case 5: //ADD reg, im32
+        case 6: //ADD reg, im32
             if(reg_x == 1){
                 aux.instr = {0x48 , 0x05};
             } else{
-                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-                uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+                ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                regs = (0b11000000) | ((reg_x & 0x7));
                 aux.instr = {ext , 0x81 , regs};
             }
-            uint8_t byte;
+            
             for(uint8_t idx = 0; idx < 4; idx++){
                 byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
                 aux.instr.push_back(byte);
             }
         break;
 
-        case 6: //BSWAP reg - Byte Swap
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7));
+        case 7: //BSWAP reg - Byte Swap
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11001000) | ((reg_x & 0x7));
             aux.instr = {ext , 0x0F , regs };
         break;
 
-        case 7: //NOT reg - One's Complement Negation
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-            uint8_t regs = (0b11010000) | ((reg_x & 0x7));
-            aux.instr = {ext , 0xF7 , regs };
-        break;
-
-        case 8: //NEG reg - Two's Complement Negation
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-            uint8_t regs = (0b11011000) | ((reg_x & 0x7));
+        case 8: //NOT reg - One's Complement Negation
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11010000) | ((reg_x & 0x7));
             aux.instr = {ext , 0xF7 , regs };
         break;
 
         case 9: //NEG reg - Two's Complement Negation
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-            uint8_t regs = (0b11001000) | ((reg_x & 0x7));
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11011000) | ((reg_x & 0x7));
+            aux.instr = {ext , 0xF7 , regs };
+        break;
+
+        case 10: //NEG reg - Two's Complement Negation
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+            regs = (0b11001000) | ((reg_x & 0x7));
             aux.instr = {ext , 0xFF , regs };
         break;
 
-        case 10: //AND
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+        case 11: //AND
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
             aux.instr = {ext , 0x21 , regs};
         break;
-        case 11: // AND reg, im32
+        case 12: // AND reg, im32
             if(reg_x == 1){
                 aux.instr = {0x48 , 0x0D};
             } else{
-                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-                uint8_t regs = (0b11001000) | ((reg_x & 0x7));
+                ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                regs = (0b11001000) | ((reg_x & 0x7));
                 aux.instr = {ext , 0x81 , regs};
             }
-            uint8_t byte;
+            
             for(uint8_t idx = 0; idx < 4; idx++){
                 byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
                 aux.instr.push_back(byte);
             }
         break;
 
-        case 12: //OR reg, reg
-            uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
-            uint8_t regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
+        case 13: //OR reg, reg
+            ext  = (0b01001000) | ((reg_x & 0x8) >> 1) | ((reg_y & 0x8) >> 3 );
+            regs = (0b11000000) | ((reg_x & 0x7) << 3) | (reg_y & 0x7);
             aux.instr = {ext , 0x09 , regs};
         break;
-        case 13: // OR reg, im32
+        case 14: // OR reg, im32
+
             if(reg_x == 1){
                 aux.instr = {0x48 , 0x25};
             } else{
-                uint8_t ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
-                uint8_t regs = (0b11100000) | ((reg_x & 0x7));
+                ext  = (0b01001000) | ((reg_x & 0x8) >> 3);
+                regs = (0b11100000) | ((reg_x & 0x7));
                 aux.instr = {ext , 0x81 , regs};
             }
-            uint8_t byte;
+            
             for(uint8_t idx = 0; idx < 4; idx++){
                 byte = (uint8_t) ((0xFF000000 >> 8*idx) & randomValue)>>(8*(3-idx));
                 aux.instr.push_back(byte);
             }
         break;
 
-        case 14: // CLC — Clear Carry Flag
+        case 15: // CLC — Clear Carry Flag
             aux.instr = {0xF8};
         break;
     }
 
     aux.size = aux.instr.size();
-    chromossome.instructions.insert(chromossome.instructions.begin() + random_line, aux);
 }
 
 
-int main(){
+void mutate(Chromossome &current){
 
-    // for(auto &x: gene_pool){
-    //     printf("size %d ", x.size());
-    //     for(auto &&g : x){
-    //         printf("%#x ", g);
-    //     }
-    //     printf("\n");
-    // }
+        uint32_t random_line = generateRandomNumber(2, current.chromossome.size()-2);
+        Instruction newGene;
+
+        selectRandomGene(newGene, random_line);
+        remapJumpLocations(random_line, newGene.size, current.chromossome, current.metadata);
+        current.chromossome.insert(current.chromossome.begin() + random_line, newGene);
+        
+}
+
+uint32_t getChromossomeSize(Chromossome &chromossome){
+    uint32_t size = 0;
+    for(uint32_t k = 0; k < chromossome.chromossome.size(); k++){
+        size += chromossome.chromossome[k].size;
+    }
+    return size;
+}
+
+int main(){
 
     FILE *file;
 
     std::vector <Instruction> origin_vector;
-    std::vector <Chromossome> chromossome_list;
+    std::vector <Chromossome> population_list;
     
     uint32_t bytes;
     void* status = 0;
     uint32_t n = 0, i = 0;
     Chromossome aux;
-    chromossome_list.push_back(aux); // just so it initializes 
+    population_list.push_back(aux); // just so it initializes 
 
     file = fopen("code.hex", "r");
     if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
@@ -532,48 +524,66 @@ int main(){
     while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
     fclose(file);
 
-    addSourceCodeToVector(origin_code, chromossome_list[0].instructions, n);
-    mapJumpLocations(chromossome_list[0].instructions, chromossome_list[0].metadata );
+    addSourceCodeToVector(origin_code, population_list[0].chromossome, n);
+    mapJumpLocations(population_list[0].chromossome, population_list[0].metadata );
 
     srand((uint32_t) time(0));
-    for (uint32_t k = 0; k < 2; k++){
 
-        uint32_t random_line = generateRandomNumber(1, chromossome_list[0].instructions.size()-1);
+    uint32_t N_GENERATIONS = 10;
+    uint32_t N_MUTATIONS = 1;
 
-        uint32_t random_gene = generateRandomNumber(0, N_GENES);
+    for(uint32_t gen = 0; gen < N_GENERATIONS; gen++){
+        std::vector<Chromossome> apt_list;
+        uint32_t popSize = population_list.size();
 
-        remapJumpLocations(random_line, gene_pool[random_gene].size(), chromossome_list[0].instructions, chromossome_list[0].metadata);
-        addRandomInstruction( chromossome_list[0], random_gene, random_line);
+        // for each chromossome
+        for (uint32_t i = 0; i < popSize; i++){
 
-        printInstructionVector(chromossome_list[0].instructions);
-        printf("\n");
+            Chromossome currentChromossome = population_list[i];
+            
+            // mutate N_MUTATIONS times
+            for (uint32_t j = 0; j < N_MUTATIONS; j++){
+                    mutate(currentChromossome);
+                    printInstructionVector(currentChromossome.chromossome);
 
-        //para thread
-        uint32_t chrom_size = 0;
-        for(uint32_t i = 0; i < chromossome_list[0].instructions.size(); i++){
-            chrom_size += chromossome_list[0].instructions[i].size;
+                    //thread related
+                    uint32_t chrom_size = getChromossomeSize(currentChromossome);
+                    uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
+                    copyVectorToArray(code2memory, population_list[0].chromossome);
+                    thread_arg_t thread_args = {
+                        .ptr = code2memory,
+                        .n = chrom_size
+                    };
+
+                    pthread_create( &threadRunner, NULL, pthreadExecuteInMemory, &thread_args);
+                    pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&threadRunner));
+                    pthread_join(threadRunner, &status);
+                    pthread_join(threadWatcher, NULL);
+                    //thread related
+
+                    printf("\tretval: %lu\n",(uint64_t) status );
+                    //FIXME: entender o por que não ta funcionando
+                    // compares with the expected result
+                    if((uint64_t) status == 6){
+                        apt_list.push_back(currentChromossome);
+                    }
+                    printf("\n");
+            }
         }
 
-        uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
-        copyVectorToArray(code2memory, chromossome_list[0].instructions);
-        thread_arg_t thread_args = {
-            .ptr = code2memory,
-            .n = chrom_size
-        };
-        //para thread 
-
-        //thread
-        pthread_create( &threadRunner, NULL, pthreadExecuteInMemory, &thread_args);
-        pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&k));
-        pthread_join(threadRunner, &status);
-        pthread_join(threadWatcher, NULL);
-        //thread
-
-        if(wasRunnerThreadKilled == 0){
-            printf("retval: %lu\n",(uint64_t) status );
+        // if there is any apt mutated chromossome, make them the new population since they have more instructions
+        if(apt_list.size() > 0){
+            population_list = apt_list;
         }
-
     }
+
+    printf("Quantos deram certo: %lu \n", population_list.size());
+    printInstructionVector(population_list[0].chromossome);
 
     return 0;
 }
+
+// Concatenating two std::vectors
+// vector1.insert( vector1.end(), vector2.begin(), vector2.end() );
+// using std::begin, std::end;
+// a.insert(end(a), begin(b), end(b));
