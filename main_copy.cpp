@@ -73,10 +73,10 @@ const std::vector<uint8_t> gene_pool[N_OF_GENES] = {
 //Variables used in the logic of thre threads used
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
-uint8_t wasRunnerThreadKilled = 0;
 pthread_t threadRunner;
 pthread_t threadWatcher;
 pthread_t threadRunnerId; 
+uint8_t isThreadRunnerAlive;
 
 typedef struct {
     uint8_t *ptr;
@@ -282,10 +282,12 @@ void executeInMemory(std::vector<Instruction> &chromossome){
     munmap ( memory , length ) ;
 }
 
-//TODO: fazer try-catch para tratar SIGBUS/SIGSEV
+//TODO: fazer try-catch para tratar SIGBUS/SIGSEV/SIGFPE/SIG32
 //TODO: fazer com que os argumentos passados ao jit sejam dinamicos? 
 void* pthreadExecuteInMemory(void* _args){
 
+    isThreadRunnerAlive = 1;
+    
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
 
@@ -306,40 +308,60 @@ void* pthreadExecuteInMemory(void* _args){
 
     munmap ( memory , length ) ;
 
+    isThreadRunnerAlive = 0;
+    // pthread_cond_signal(&cond);
     pthread_exit ( (void *) retval );
 }
 
+
 void *pthreadWaitOrKill(void* args){
 
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ts.tv_sec += 2;
-    // clock_t start, end;
-    // double cpu_time_used;
+    clock_t start, end;
+    double cpu_time_used;
 
-    // start = clock();
+    start = clock();
 
-    // pthread_cond_init(&cond, NULL);
-
-    pthread_mutex_lock(&mutex);
-    uint32_t n = pthread_cond_timedwait(&cond, &mutex, &ts);
-    pthread_mutex_unlock(&mutex);
-
-    if (n == 0 || n == ETIMEDOUT){
-
-        pthread_cancel( *(pthread_t*) args );
-
-        // end = clock();
-        // cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+    while (true)
+    {
+        pthread_mutex_trylock(&mutex);
+        end = clock();
+        cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
+        if(isThreadRunnerAlive == 0 ){
+            pthread_exit(NULL);
+        }else if(cpu_time_used >= 2){
+            pthread_cancel( *(pthread_t*) args );
+            pthread_exit(NULL);
+        }
+        pthread_mutex_unlock(&mutex);
+        sched_yield();
     }
-    // pthread_cond_destroy(&cond);
-    pthread_exit(NULL);
 }
+
+// void *pthreadWaitOrKill(void* args){
+
+//     struct timespec ts;
+//     clock_gettime(CLOCK_REALTIME, &ts);
+//     ts.tv_sec += 2;
+//     // pthread_cond_init(&cond, NULL);
+//     pthread_mutex_lock(&mutex);
+//     uint32_t n = pthread_cond_timedwait(&cond, &mutex, &ts);
+//     pthread_mutex_unlock(&mutex);
+
+//     if (n == 0 || n == ETIMEDOUT){
+//         pthread_cancel( *(pthread_t*) args );
+//     }
+//     // pthread_cond_destroy(&cond);
+//     pthread_exit(NULL);
+// }
 
 // Inserts in *aux a random instruction (gene) 
 void selectRandomGene(Instruction &aux, uint32_t random_line){
 
-    uint8_t reg_x = generateRandomNumber(1, 15);    // rax is avoided (0)
+    uint8_t reg_x;
+    do{
+        reg_x = generateRandomNumber(1, 15);    // rax is avoided (0)
+    }while(reg_x == 4 || reg_x == 5);   // rsp and rbp are avoided also
+    
     uint8_t reg_y = generateRandomNumber(1, 15);    // rax is avoided (0)
     uint32_t randomValue = generateRandomNumber(0, UINT32_MAX); // a random value to add when a IM32 is needed
     uint32_t randomInstruction = generateRandomNumber(0, 15);   // 15 is the number of decoded instructions 
@@ -485,7 +507,7 @@ void selectRandomGene(Instruction &aux, uint32_t random_line){
 
 void mutate(Chromossome &current){
 
-        uint32_t random_line = generateRandomNumber(2, current.chromossome.size()-2);
+        uint32_t random_line = generateRandomNumber(2, current.chromossome.size()-3);
         Instruction newGene;
 
         selectRandomGene(newGene, random_line);
@@ -510,7 +532,7 @@ int main(){
     std::vector <Chromossome> population_list;
     
     uint32_t bytes;
-    void* status = 0;
+    void* retval = 0;
     uint32_t n = 0, i = 0;
     Chromossome aux;
     population_list.push_back(aux); // just so it initializes 
@@ -530,55 +552,65 @@ int main(){
     srand((uint32_t) time(0));
 
     uint32_t N_GENERATIONS = 10;
-    uint32_t N_MUTATIONS = 1;
-
+    uint32_t N_MUTATIONS = 3;
+    
+    // repeat only for N_GENERATIONS
     for(uint32_t gen = 0; gen < N_GENERATIONS; gen++){
-        std::vector<Chromossome> apt_list;
+
+        std::vector<Chromossome> apt_list; 
+
         uint32_t popSize = population_list.size();
 
         // for each chromossome
         for (uint32_t i = 0; i < popSize; i++){
 
-            Chromossome currentChromossome = population_list[i];
-            
             // mutate N_MUTATIONS times
             for (uint32_t j = 0; j < N_MUTATIONS; j++){
+                    Chromossome currentChromossome = population_list[i];
+
                     mutate(currentChromossome);
-                    printInstructionVector(currentChromossome.chromossome);
+                    // printInstructionVector(currentChromossome.chromossome);
 
                     //thread related
                     uint32_t chrom_size = getChromossomeSize(currentChromossome);
                     uint8_t *code2memory = (uint8_t*) malloc(sizeof(uint8_t)*chrom_size); 
-                    copyVectorToArray(code2memory, population_list[0].chromossome);
+                    copyVectorToArray(code2memory, currentChromossome.chromossome);
                     thread_arg_t thread_args = {
                         .ptr = code2memory,
                         .n = chrom_size
                     };
 
+                    isThreadRunnerAlive = 1;
                     pthread_create( &threadRunner, NULL, pthreadExecuteInMemory, &thread_args);
                     pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&threadRunner));
-                    pthread_join(threadRunner, &status);
+                    pthread_join(threadRunner, &retval);
                     pthread_join(threadWatcher, NULL);
+                    
                     //thread related
 
-                    printf("\tretval: %lu\n",(uint64_t) status );
+                    printf("retval: %lu\n",(uint64_t) retval );
                     //FIXME: entender o por que não ta funcionando
                     // compares with the expected result
-                    if((uint64_t) status == 6){
+                    if((uint64_t) retval == 6){
                         apt_list.push_back(currentChromossome);
+                        if(apt_list.size() > 5){
+                            break;
+                        }
                     }
-                    printf("\n");
+                    free(code2memory);
             }
         }
 
         // if there is any apt mutated chromossome, make them the new population since they have more instructions
         if(apt_list.size() > 0){
             population_list = apt_list;
+            // printInstructionVector(population_list[0].chromossome);
         }
     }
 
     printf("Quantos deram certo: %lu \n", population_list.size());
     printInstructionVector(population_list[0].chromossome);
+    executeInMemory(population_list[0].chromossome);
 
     return 0;
 }
