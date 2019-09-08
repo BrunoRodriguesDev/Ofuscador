@@ -10,7 +10,7 @@
 #include <map>
 #include <iostream>
 
-//g++ -O3 -g -Wall -pthread main.cpp -o main
+//g++ -O3 -g -Wall -pthread algGenetico.cpp -o alg
 
 
 #define N_GENES 1
@@ -43,6 +43,7 @@ struct Instruction {
     std::vector <uint8_t> instr;
     uint8_t size:4; //  15 = 1111, 4 bits
 };
+
 struct MetadataJump{
     uint32_t src_line;
     uint32_t dest_line;
@@ -322,60 +323,92 @@ void addRandomInstruction(Chromossome &chromossome, uint32_t random_gene, uint32
 
 int main(){
 
-    // for(auto &x: gene_pool){
-    //     printf("size %d ", x.size());
-    //     for(auto &&g : x){
-    //         printf("%#x ", g);
-    //     }
-    //     printf("\n");
-    // }
+  // for(auto &x: gene_pool){
+  //     printf("size %d ", x.size());
+  //     for(auto &&g : x){
+  //         printf("%#x ", g);
+  //     }
+  //     printf("\n");
+  // }
 
-    FILE *file;
+  FILE *file;
 
 
-    std::vector <Instruction> origin_vector;
-    std::vector <Chromossome> chromossome_list;
-    pthread_t thread;
-    uint32_t bytes;
-    void* status = 0;
-    uint32_t n = 0, i = 0;
-    Chromossome aux;
-    chromossome_list.push_back(aux); // just so it initializes 
+  std::vector <Instruction> origin_vector;
+  std::vector <Chromossome> chromossome_list, chromossome_list_child, chromossome_temp;
+  pthread_t thread;
+  uint32_t bytes;
+  void* status = 0;
+  uint32_t n = 0, i = 0;
+  Chromossome aux;
+  chromossome_list.push_back(aux); // just so it initializes 
+  chromossome_list_child.push_back(aux); 
+  chromossome_temp.push_back(aux); 
 
-    file = fopen("code.hex", "r");
-    if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
-    else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
+  file = fopen("code.hex", "r");
+  if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
+  else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
 
-    rewind(file);
-    uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
-    // uint8_t origin_code[n];    
-    while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
-    fclose(file);
+  rewind(file);
+  uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
+  // uint8_t origin_code[n];    
+  while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
+  fclose(file);
 
-    // addSourceCodeToVector(origin_code, chromossome_list[0].instructions, sizeof(origin_code)/sizeof(uint8_t));
+  // addSourceCodeToVector(origin_code, chromossome_list[0].instructions, sizeof(origin_code)/sizeof(uint8_t));
     addSourceCodeToVector(origin_code, chromossome_list[0].instructions, n);
-    mapJumpLocations(chromossome_list[0].instructions, chromossome_list[0].metadata );
+    mapJumpLocations(chromossome_list[0].instructions, chromossome_list[0].metadata);
 
-    srand((uint32_t) time(0));
-    for (uint32_t k = 0; k < 1; k++){
+  srand((uint32_t) time(0));
 
-        uint32_t random_line = generateRandomNumber(1, chromossome_list[0].instructions.size()-1);
+  
 
+  int filhos = 5;
+  int nGeracoes = 50;
+
+  int popSize = 1;
+  int auxSize = 0;
+  chromossome_list_child.resize(filhos);
+
+  for (int i = 0; i < nGeracoes; i++){//gerações 
+    for (int j = 0; j < chromossome_list.size(); j++){//cromossomos (tamanho da população, que pode ser aumentada)
+      for (int k = 0; k < filhos; k++){//quantidade de filhos gerados para cada cromosomo
+
+        chromossome_list_child[k] = chromossome_list[j];
+
+        //seleciona uma linha aleatória
+        uint32_t random_line = generateRandomNumber(1, chromossome_list_child[k].instructions.size()-1);
+
+        //seleciona um gene aleatório
         uint32_t random_gene = generateRandomNumber(0, N_GENES);
 
-        remapJumpLocations(random_line, gene_pool[random_gene].size(), chromossome_list[0].instructions, chromossome_list[0].metadata);
-        addRandomInstruction( chromossome_list[0], random_gene, random_line);
+        remapJumpLocations(random_line, gene_pool[random_gene].size(), chromossome_list_child[k].instructions, chromossome_list_child[k].metadata);
+        addRandomInstruction( chromossome_list_child[k], random_gene, random_line);
 
-        printInstructionVector(chromossome_list[0].instructions);
+        printf("\n/////////////////////////////////////////////////////////////////\n");
+        printInstructionVector(chromossome_list_child[k].instructions);
         printf("\n");
-
-        pthread_create( &thread, NULL, pthreadExecuteInMemory, &chromossome_list[0]);
+        printf("Geração(%d) / Cromossomo(%d) / Variação(%d)\n", i+1, j+1, k+1);
+        printf("/////////////////////////////////////////////////////////////////");
+        printf("\n\n");
+        
+        pthread_create( &thread, NULL, pthreadExecuteInMemory, &chromossome_list_child[k]);
         pthread_join(thread, &status);
 
         printf("retval: %lu",(uint64_t) status );
 
-        // executeInMemory(chromossome_list[0].instructions);
+        chromossome_temp.push_back(chromossome_list_child[k]); 
+        auxSize++;
+
+      }
+        
     }
+    popSize = popSize+auxSize;
+    auxSize = 0;
+    printf("\n/////////////////////////////////////////////////////////////////////Tamanho da população: %d\n", popSize);
+    chromossome_list.resize(popSize);
+    chromossome_list = chromossome_list_child;
+  }
 
     return 0;
 }
