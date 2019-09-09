@@ -3,6 +3,7 @@
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include<signal.h>
 #include <stdlib.h>
 #include <time.h>
 #include <stdio.h>
@@ -304,11 +305,10 @@ void* pthreadExecuteInMemory(void* _args){
         ( const uint64_t (*) ( const uint32_t , const uint32_t , const uint64_t ) ) ( memory ) ;
     // printf ( " 2^123456789 mod 18446744073709551533 = %lu \n" , (* jit ) (2 , 123456789 ,18446744073709551533ULL ) ) ;
 
-    uint64_t retval = (*jit)(2, 12, 10);
+    uint64_t retval = 0;
+    retval = (*jit)(2, 12, 10);
 
     munmap ( memory , length ) ;
-
-    isThreadRunnerAlive = 0;
     // pthread_cond_signal(&cond);
     pthread_exit ( (void *) retval );
 }
@@ -357,12 +357,16 @@ void *pthreadWaitOrKill(void* args){
 // Inserts in *aux a random instruction (gene) 
 void selectRandomGene(Instruction &aux, uint32_t random_line){
 
-    uint8_t reg_x;
+    uint8_t reg_y, reg_x;
     do{
         reg_x = generateRandomNumber(1, 15);    // rax is avoided (0)
-    }while(reg_x == 4 || reg_x == 5);   // rsp and rbp are avoided also
+    }while(reg_x == 4 || reg_x == 5);   // rsp and rbp are also avoided
+
+    do{
+        reg_y = generateRandomNumber(1, 15);    // rax is avoided (0)
+    }while(reg_y == 4 || reg_y == 5);   // rsp and rbp are also avoided
     
-    uint8_t reg_y = generateRandomNumber(1, 15);    // rax is avoided (0)
+    printf("regx[%d] regy[%d]\n",reg_x, reg_y);
     uint32_t randomValue = generateRandomNumber(0, UINT32_MAX); // a random value to add when a IM32 is needed
     uint32_t randomInstruction = generateRandomNumber(0, 15);   // 15 is the number of decoded instructions 
     uint8_t ext;
@@ -504,7 +508,6 @@ void selectRandomGene(Instruction &aux, uint32_t random_line){
     aux.size = aux.instr.size();
 }
 
-
 void mutate(Chromossome &current){
 
         uint32_t random_line = generateRandomNumber(2, current.chromossome.size()-3);
@@ -524,8 +527,24 @@ uint32_t getChromossomeSize(Chromossome &chromossome){
     return size;
 }
 
+void signals_callback_handler(int signumber){
+    if(signumber == SIGSEGV){
+        printf("DEU SIGSEGV\n");
+        exit(signumber);
+    }else if(signumber == SIGBUS){
+        printf("DEU SIGBUS\n");
+    }else if(signumber == SIGFPE){
+        printf("DEU SIGfpe\n");
+    }
+    pthread_cancel(threadRunner);
+    // 
+}
+
 int main(){
 
+    signal(SIGSEGV, signals_callback_handler);
+    signal(SIGBUS, signals_callback_handler);
+    signal(SIGFPE, signals_callback_handler);
     FILE *file;
 
     std::vector <Instruction> origin_vector;
@@ -584,12 +603,12 @@ int main(){
                     pthread_create( &threadRunner, NULL, pthreadExecuteInMemory, &thread_args);
                     pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&threadRunner));
                     pthread_join(threadRunner, &retval);
+                    isThreadRunnerAlive = 0;
                     pthread_join(threadWatcher, NULL);
                     
                     //thread related
 
-                    printf("retval: %lu\n",(uint64_t) retval );
-                    //FIXME: entender o por que não ta funcionando
+                    // printf("retval: %lu\n",(uint64_t) retval );
                     // compares with the expected result
                     if((uint64_t) retval == 6){
                         apt_list.push_back(currentChromossome);
