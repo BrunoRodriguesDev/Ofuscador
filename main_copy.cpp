@@ -72,14 +72,37 @@ pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 pthread_t threadRunner;
 pthread_t threadWatcher;
-pthread_t threadRunnerId; 
 uint8_t isThreadRunnerAlive;
 
 typedef struct {
     uint8_t *ptr;
     uint32_t n;
 } thread_arg_t, *ptr_thread_arg_t;
-//Variables used in the logic of thre threads used
+
+//
+
+void printInstructionVector(const std::vector<Instruction> &vec);
+void addSourceCodeToVector(uint8_t* sourcecode, std::vector<Instruction> &to_vector, uint32_t size);
+void printInstructionVector(const std::vector<Instruction> &vec);
+void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec, std::vector<MetadataJump> &jumps_metadata);
+void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromossome);
+void executeInMemory(std::vector<Instruction> &chromossome);
+
+void mutate(Chromossome &current);
+void selectRandomGene(Instruction &aux, uint32_t random_line);
+
+void *pthreadWaitOrKill(void* args);
+void *pthreadExecuteInMemory(void* _args);
+void *pthreadWaitWithTimeoutAndCond(void* args);
+
+static void sigaction_sigfpe(int signal, siginfo_t *si, void *arg);
+
+uint8_t getSizeOfInstruction(uint8_t opcode);
+uint32_t getChromossomeSize(Chromossome &chromossome);
+uint32_t mapJumpLocationsAux(const std::vector<Instruction> vec, uint32_t line, int32_t value);
+inline uint32_t generateRandomNumber(uint32_t min, uint32_t max);
+
+//
 
 uint8_t getSizeOfInstruction(uint8_t opcode){
     return instruction_sizes_map[opcode];
@@ -263,7 +286,7 @@ void executeInMemory(std::vector<Instruction> &chromossome){
     uint32_t length = sysconf ( _SC_PAGE_SIZE ) ;
     void * memory = mmap (NULL , length , PROT_NONE , MAP_PRIVATE | MAP_ANONYMOUS , -1 , 0);
     mprotect ( memory , length , PROT_WRITE );
-    memcpy ( memory , ( void *) ( code2memory ) , sizeof(code2memory)*chrom_size );
+    memcpy ( memory , ( void *) ( code2memory ) , sizeof(uint8_t)*chrom_size );
     mprotect ( memory , length , PROT_EXEC );
 
     // uint32_t n = 10;
@@ -276,7 +299,18 @@ void executeInMemory(std::vector<Instruction> &chromossome){
 
     printf ( "2^12 mod 10 = %lu \n" , (* jit ) (2 , 12 ,10 ) ) ; // valor menor para usar enquanto testo
 
+    free(code2memory);
     munmap ( memory , length ) ;
+}
+
+
+void setSignalHanlder(int32_t signo){
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sigemptyset(&sa.sa_mask);
+    sa.sa_sigaction = sigaction_sigfpe;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(signo, &sa, NULL);
 }
 
 void* pthreadExecuteInMemory(void* _args){
@@ -285,6 +319,8 @@ void* pthreadExecuteInMemory(void* _args){
     
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, NULL);
+    setSignalHanlder(SIGFPE);
+    usleep(100);
 
     ptr_thread_arg_t ptr_args = (ptr_thread_arg_t) _args;
 
@@ -314,24 +350,25 @@ void *pthreadWaitOrKill(void* args){
 
     // clock_t start, end;
     // double cpu_time_used;
-    time_t begin = time(NULL);
-    // try{
+    time_t begin = NULL, end = NULL;
+    
+    begin = time(NULL);
+    
     //     start = clock();
-    // }catch(const std::exception& e){
-    //     std::cerr << e.what() << '\n';
-    // }
     
     while (true){
         // pthread_mutex_trylock(&mutex);
         // end = clock();
-        time_t end = time(NULL);
+        usleep(100);
+        end = time(NULL);
 
         // cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
         if(isThreadRunnerAlive == 0 ){
             printf("Não precisou matar, com tempo %d\n", end-begin);
             break;
         }else if(end - begin >= 2){
-            uint32_t x =  pthread_cancel( *(pthread_t*) args );
+            // uint32_t x =  pthread_cancel( *(pthread_t*) args );
+            uint32_t x =  pthread_cancel( threadRunner );
             printf("Precisou matar, com tempo %d e valor %d\n", end-begin, x);
             break;
         }
@@ -341,22 +378,22 @@ void *pthreadWaitOrKill(void* args){
     pthread_exit(NULL);
 }
 
-// void *pthreadWaitOrKill(void* args){
+void *pthreadWaitWithTimeoutAndCond(void* args){
 
-//     struct timespec ts;
-//     clock_gettime(CLOCK_REALTIME, &ts);
-//     ts.tv_sec += 2;
-//     // pthread_cond_init(&cond, NULL);
-//     pthread_mutex_lock(&mutex);
-//     uint32_t n = pthread_cond_timedwait(&cond, &mutex, &ts);
-//     pthread_mutex_unlock(&mutex);
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += 2;
+    // pthread_cond_init(&cond, NULL);
+    pthread_mutex_lock(&mutex);
+    uint32_t n = pthread_cond_timedwait(&cond, &mutex, &ts);
+    pthread_mutex_unlock(&mutex);
 
-//     if (n == 0 || n == ETIMEDOUT){
-//         pthread_cancel( *(pthread_t*) args );
-//     }
-//     // pthread_cond_destroy(&cond);
-//     pthread_exit(NULL);
-// }
+    if (n == 0 || n == ETIMEDOUT){
+        pthread_cancel( *(pthread_t*) args );
+    }
+    // pthread_cond_destroy(&cond);
+    pthread_exit(NULL);
+}
 
 // Inserts in *aux a random instruction (gene) 
 void selectRandomGene(Instruction &aux, uint32_t random_line){
@@ -530,41 +567,33 @@ uint32_t getChromossomeSize(Chromossome &chromossome){
     return size;
 }
 
-void signals_callback_handler(int signumber){
-    if(signumber == SIGSEGV){
-        printf("DEU SIGSEGV\n");
-        exit(signumber);
-    }else if(signumber == SIGBUS){
-        printf("DEU SIGBUS\n");
-    }else if(signumber == SIGFPE){
-        printf("DEU SIGfpe\n");
-    }
-    pthread_cancel(threadRunner);
-    // 
-}
+// void signals_callback_handler(int signumber){
+//     if(signumber == SIGSEGV){
+//         printf("DEU SIGSEGV\n");
+//         exit(signumber);
+//     }else if(signumber == SIGBUS){
+//         printf("DEU SIGBUS\n");
+//     }else if(signumber == SIGFPE){
+//         printf("DEU SIGfpe\n");
+//     }
+//     pthread_cancel(threadRunner);
+//     // 
+// }
 
 
-static void sigaction_sigfpe(int signal, siginfo_t *si, void *arg)
-{
+static void sigaction_sigfpe(int signal, siginfo_t *si, void *arg){
     ucontext_t *ctx = (ucontext_t *)arg;
 
-    isThreadRunnerAlive = 0;
     printf("Caught SIGFPE, addr %p, RIP 0x%llx\n", si->si_addr, ctx->uc_mcontext.gregs[REG_RIP]);
-    pthread_cancel(threadRunner);
+    pthread_cancel(pthread_self());
+    isThreadRunnerAlive = 0;
     ctx->uc_mcontext.gregs[REG_RIP] += 6; // skipping the div regx instruction
 
 }
 
-
-
 int main(){
 
-    struct sigaction sa;
-    memset(&sa, 0, sizeof(sa));
-    sigemptyset(&sa.sa_mask);
-    sa.sa_sigaction = sigaction_sigfpe;
-    sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGFPE, &sa, NULL);
+    // setSignalHanlder(SIGFPE);
 
     // signal(SIGSEGV, signals_callback_handler);
     // signal(SIGBUS, signals_callback_handler);
@@ -596,7 +625,7 @@ int main(){
 
     uint32_t N_GENERATIONS = 20;
     uint32_t N_MUTATIONS = 3;
-    uint32_t N_ALLOWED_GENES = 3;
+    uint32_t N_ALLOWED_GENES = 1;
     
     // repeat only for N_GENERATIONS
     for(uint32_t gen = 0; gen < N_GENERATIONS; gen++){
@@ -626,7 +655,8 @@ int main(){
 
                     isThreadRunnerAlive = 1;
                     pthread_create( &threadRunner, NULL, pthreadExecuteInMemory, &thread_args);
-                    pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&threadRunner));
+                    // pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, (void*)(&threadRunner));
+                    pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, NULL);
                     pthread_join(threadRunner, &retval);
                     pthread_join(threadWatcher, NULL);
                     printf("\n");
@@ -657,10 +687,7 @@ int main(){
     printInstructionVector(population_list[0].chromossome);
     executeInMemory(population_list[0].chromossome);
 
+    free(origin_code);
+
     return 0;
 }
-
-// Concatenating two std::vectors
-// vector1.insert( vector1.end(), vector2.begin(), vector2.end() );
-// using std::begin, std::end;
-// a.insert(end(a), begin(b), end(b));
