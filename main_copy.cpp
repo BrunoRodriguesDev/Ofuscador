@@ -644,11 +644,13 @@ int main(){
     printInstructionVector(population_list[0].chromossome);
     mapJumpLocations(population_list[0].chromossome, population_list[0].metadata );
 
+    uint32_t tamanho_original = population_list[0].chromossome.size();
+
     srand((uint32_t) time(0));
 
     uint32_t N_GENERATIONS = 100;
-    uint32_t N_MUTATIONS = 3;
-    uint32_t N_ALLOWED_GENES = 1;
+    uint32_t N_MUTATIONS = 5;
+    uint32_t N_ALLOWED_GENES = 3;
     
     // repeat only for N_GENERATIONS
     for(uint32_t gen = 0; gen < N_GENERATIONS; gen++){
@@ -687,6 +689,8 @@ int main(){
                     // compares with the expected result
                     if((uint64_t) retval == 6){
                         apt_list.push_back(currentChromossome);
+                        printInstructionVector(currentChromossome.chromossome);
+                        printf("Geração(%u) Cromossomo(%u) Mutação(%u)\n",gen, i, j);
                         if(apt_list.size() >= N_ALLOWED_GENES){
                             free(code2memory);
                             break;
@@ -703,9 +707,11 @@ int main(){
             // printInstructionVector(population_list[0].chromossome);
         }
     }
-
-    printf("Quantos deram certo na ultima geração: %lu \n", population_list.size());
+    printf("\n\n\n////////////////////////////////////////////////////////////////\n");
+    printf("Código de saída:\n");
     printInstructionVector(population_list[0].chromossome);
+    printf("Instruções inseridas: %lu \n", population_list[0].chromossome.size()-tamanho_original);
+    printf("Teste de execução: ");
     executeInMemory(population_list[0].chromossome);
     // free(origin_code);
 
