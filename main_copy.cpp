@@ -63,7 +63,19 @@ std::map <uint8_t, uint8_t> instruction_sizes_map = {
     {0x4D, 3},  // xor regx, regx
     {0x66, 4},  // movi 
     {0xE9, 5},  // jmp im32
-    {0x0F, 6}   // jae im32
+    {0x0F, 6},   // jae im32
+    {0x50, 1},
+    {0x51, 1},
+    {0x52, 1},
+    {0x56, 1},
+    {0x57, 1},
+    {0x5D, 1},
+    {0x58, 1},
+    {0x59, 1},
+    {0x5A, 1},
+    {0x5E, 1},
+    {0x5F, 1},
+    {0x41, 2}
 };
 
 
@@ -83,6 +95,7 @@ typedef struct {
 
 void printInstructionVector(const std::vector<Instruction> &vec);
 void addSourceCodeToVector(uint8_t* sourcecode, std::vector<Instruction> &to_vector, uint32_t size);
+void addSourceCodeToArray(uint8_t* sourcecode, FILE *file);
 void printInstructionVector(const std::vector<Instruction> &vec);
 void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instruction> &vec, std::vector<MetadataJump> &jumps_metadata);
 void copyVectorToArray(uint8_t *code2memory, std::vector<Instruction> &chromossome);
@@ -105,6 +118,7 @@ inline uint32_t generateRandomNumber(uint32_t min, uint32_t max);
 //
 
 uint8_t getSizeOfInstruction(uint8_t opcode){
+    printf("%#.2X  -> %d\n", opcode, instruction_sizes_map[opcode]);
     return instruction_sizes_map[opcode];
 }
 
@@ -299,7 +313,6 @@ void executeInMemory(std::vector<Instruction> &chromossome){
 
     printf ( "2^12 mod 10 = %lu \n" , (* jit ) (2 , 12 ,10 ) ) ; // valor menor para usar enquanto testo
 
-    free(code2memory);
     munmap ( memory , length ) ;
 }
 
@@ -339,7 +352,6 @@ void* pthreadExecuteInMemory(void* _args){
     retval = (*jit)(2, 12, 10);
 
     munmap ( memory , length ) ;
-    printf("Terminei normal, com valor %d\n", retval);
     // pthread_cond_signal(&cond);
     isThreadRunnerAlive = 0;
     pthread_exit ( (void *) retval );
@@ -350,7 +362,7 @@ void *pthreadWaitOrKill(void* args){
 
     // clock_t start, end;
     // double cpu_time_used;
-    time_t begin = NULL, end = NULL;
+    volatile time_t begin = NULL, end = NULL;
     
     begin = time(NULL);
     
@@ -364,12 +376,9 @@ void *pthreadWaitOrKill(void* args){
 
         // cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
         if(isThreadRunnerAlive == 0 ){
-            printf("Não precisou matar, com tempo %d\n", end-begin);
             break;
         }else if(end - begin >= 2){
-            // uint32_t x =  pthread_cancel( *(pthread_t*) args );
-            uint32_t x =  pthread_cancel( threadRunner );
-            printf("Precisou matar, com tempo %d e valor %d\n", end-begin, x);
+            pthread_cancel( threadRunner );
             break;
         }
         // pthread_mutex_unlock(&mutex);
@@ -550,13 +559,13 @@ void selectRandomGene(Instruction &aux, uint32_t random_line){
 
 void mutate(Chromossome &current){
 
-        uint32_t random_line = generateRandomNumber(2, current.chromossome.size()-3);
+        //FIXME: 10 esta hardcoded
+        uint32_t random_line = generateRandomNumber(10, current.chromossome.size()-10);
         Instruction newGene;
 
         selectRandomGene(newGene, random_line);
         remapJumpLocations(random_line, newGene.size, current.chromossome, current.metadata);
         current.chromossome.insert(current.chromossome.begin() + random_line, newGene);
-        
 }
 
 uint32_t getChromossomeSize(Chromossome &chromossome){
@@ -566,20 +575,6 @@ uint32_t getChromossomeSize(Chromossome &chromossome){
     }
     return size;
 }
-
-// void signals_callback_handler(int signumber){
-//     if(signumber == SIGSEGV){
-//         printf("DEU SIGSEGV\n");
-//         exit(signumber);
-//     }else if(signumber == SIGBUS){
-//         printf("DEU SIGBUS\n");
-//     }else if(signumber == SIGFPE){
-//         printf("DEU SIGfpe\n");
-//     }
-//     pthread_cancel(threadRunner);
-//     // 
-// }
-
 
 static void sigaction_sigfpe(int signal, siginfo_t *si, void *arg){
     ucontext_t *ctx = (ucontext_t *)arg;
@@ -591,12 +586,37 @@ static void sigaction_sigfpe(int signal, siginfo_t *si, void *arg){
 
 }
 
+void addSourceCodeToArray(uint8_t *sourcecode, FILE *file){
+    
+    uint32_t bytes;
+    uint32_t i = 0;
+
+    // Push/Pop non-preseverd registers (without rax). 
+    uint8_t prologue[] = {0x51, 0x52, 0x56, 0x57, 0x41, 0x50, 0x41 ,0x51 ,0x41 ,0x52 ,0x41, 0x53 };
+    uint8_t epilogue[] = {0x59 ,0x5A ,0x5E ,0x5F ,0x41 ,0x58 ,0x41 ,0x59 ,0x41 , 0x5A ,0x41 ,0x5B };
+
+    while ((fscanf(file, "%2x", &bytes)) != EOF) {
+        
+        if((uint8_t)bytes == 0x55){
+            for (auto &elem : prologue){
+                sourcecode[i++] = elem;
+            }
+        }
+
+        if((uint8_t)bytes == 0xC3){
+            for(auto &elem : epilogue){
+                sourcecode[i++] = elem;
+            }
+        }
+        sourcecode[i++] = (uint8_t) bytes;
+    }
+
+
+}
+
 int main(){
 
     // setSignalHanlder(SIGFPE);
-
-    // signal(SIGSEGV, signals_callback_handler);
-    // signal(SIGBUS, signals_callback_handler);
     // signal(SIGFPE, signals_callback_handler);
     FILE *file;
 
@@ -605,25 +625,33 @@ int main(){
     
     uint32_t bytes;
     void* retval = 0;
-    uint32_t n = 0, i = 0;
+    uint32_t n = 0;
     Chromossome aux;
     population_list.push_back(aux); // just so it initializes 
 
     file = fopen("code.hex", "r");
     if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
     else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
+    printf("n %d",n);
 
     rewind(file);
+    //FIXME:
+    // n += 24; // hardcoded 
+    // uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
+    // addSourceCodeToArray(origin_code, file); 
     uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));  
-    while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[i++] = (uint8_t) bytes;
+    uint32_t l = 0;
+    while ((fscanf(file, "%2x", &bytes)) != EOF) origin_code[l++] = (uint8_t) bytes;
+    
     fclose(file);
 
     addSourceCodeToVector(origin_code, population_list[0].chromossome, n);
+    printInstructionVector(population_list[0].chromossome);
     mapJumpLocations(population_list[0].chromossome, population_list[0].metadata );
 
     srand((uint32_t) time(0));
 
-    uint32_t N_GENERATIONS = 20;
+    uint32_t N_GENERATIONS = 100;
     uint32_t N_MUTATIONS = 3;
     uint32_t N_ALLOWED_GENES = 1;
     
@@ -659,15 +687,13 @@ int main(){
                     pthread_create( &threadWatcher, NULL, pthreadWaitOrKill, NULL);
                     pthread_join(threadRunner, &retval);
                     pthread_join(threadWatcher, NULL);
-                    printf("\n");
-                    
                     //thread related
 
-                    // printf("retval: %lu\n",(uint64_t) retval );
                     // compares with the expected result
                     if((uint64_t) retval == 6){
                         apt_list.push_back(currentChromossome);
                         if(apt_list.size() >= N_ALLOWED_GENES){
+                            free(code2memory);
                             break;
                         }
                     }
@@ -686,8 +712,7 @@ int main(){
     printf("Quantos deram certo: %lu \n", population_list.size());
     printInstructionVector(population_list[0].chromossome);
     executeInMemory(population_list[0].chromossome);
-
-    free(origin_code);
+    // free(origin_code);
 
     return 0;
 }
