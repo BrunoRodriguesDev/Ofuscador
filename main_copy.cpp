@@ -118,7 +118,6 @@ inline uint32_t generateRandomNumber(uint32_t min, uint32_t max);
 //
 
 uint8_t getSizeOfInstruction(uint8_t opcode){
-    printf("%#.2X  -> %d\n", opcode, instruction_sizes_map[opcode]);
     return instruction_sizes_map[opcode];
 }
 
@@ -221,7 +220,6 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
         uint32_t src_line = jumps_metadata[i].src_line;
         uint32_t dest_line = jumps_metadata[i].dest_line;
         int32_t rel_value = jumps_metadata[i].rel_value;
-        // printf("antes: jumps_metadata[%d] -> src=%d, dest=%d, value=%d \n",i, jumps_metadata[i].src_line, jumps_metadata[i].dest_line, jumps_metadata[i].rel_value);
 
         if (rel_value > 0){ // dest_line > src_line (a jump forwards)
             if(newline > src_line && newline <= dest_line){ // we need to alter dest_line and value
@@ -263,7 +261,6 @@ void remapJumpLocations(uint32_t newline, uint8_t nbytes, std::vector<Instructio
                 jumps_metadata[i].dest_line++;
             }
         }
-        // printf("antes: jumps_metadata[%d] -> src=%d, dest=%d, value=%d \n",i, jumps_metadata[i].src_line, jumps_metadata[i].dest_line, jumps_metadata[i].rel_value);
     }
 }
 
@@ -610,8 +607,6 @@ void addSourceCodeToArray(uint8_t *sourcecode, FILE *file){
         }
         sourcecode[i++] = (uint8_t) bytes;
     }
-
-
 }
 
 int main(){
@@ -632,9 +627,8 @@ int main(){
     file = fopen("code.hex", "r");
     if (file == NULL){ printf("Erro: nao foi possivel abrir o arquivo\n"); return 0; }
     else while ((fscanf(file, "%2x", &bytes)) != EOF) n++;
-    printf("n %d",n);
-
     rewind(file);
+    
     //FIXME:
     // n += 24; // hardcoded 
     // uint8_t* origin_code = (uint8_t*) malloc(n*sizeof( uint8_t ));
@@ -646,6 +640,7 @@ int main(){
     fclose(file);
 
     addSourceCodeToVector(origin_code, population_list[0].chromossome, n);
+    printf("Cromossomo inicial: \n");
     printInstructionVector(population_list[0].chromossome);
     mapJumpLocations(population_list[0].chromossome, population_list[0].metadata );
 
@@ -709,7 +704,7 @@ int main(){
         }
     }
 
-    printf("Quantos deram certo: %lu \n", population_list.size());
+    printf("Quantos deram certo na ultima geração: %lu \n", population_list.size());
     printInstructionVector(population_list[0].chromossome);
     executeInMemory(population_list[0].chromossome);
     // free(origin_code);
